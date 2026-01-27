@@ -27,3 +27,4 @@
     - Selectable PG versions (default 15)
   - Node Version Manager (NVM)
     - Selectable node.js version via terminal (no default)
+    

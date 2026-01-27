@@ -29,9 +29,93 @@ Vagrant.configure("2") do |config|
   config.vm.box = "boxen/debian-13"
   config.vm.box_version = "2025.08.20.12"
   config.vm.box_check_update = false
+  project_root = File.expand_path(ENV['VAGRANT_CWD'] || Dir.pwd)
+
+  
+  # --- Switch to host (project) key after the first successful provision+reload ---
+  if File.exist?(File.join(project_root, '.vagrant', 'hostkey_ready'))
+    config.ssh.private_key_path = [
+      File.join(project_root, '.vagrant_keys', 'vagrant_ed25519').tr('\\','/')
+    ]
+    # Enforce key-only auth (no password fallback)
+    config.ssh.password  = nil
+    config.ssh.keys_only = true
+  end
+
+  # ------------------------------------------------------------------
+  # BEFORE 'vagrant up': generate SSH keypair on the Windows host
+  # ------------------------------------------------------------------
+  config.trigger.before :up do |t|
+    t.name = "Generate SSH keypair on host (Windows)"
+    t.run  = {
+      inline: "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"scripts/host/generate_ssh_keys.ps1\" -KeyDir \"#{project_root}/.vagrant_keys\" -KeyName vagrant_ed25519"
+  }
+  end
+
+  # First boot uses the box's default (insecure) key so provisioners can run
   config.ssh.insert_key = false
-  config.ssh.private_key_path = ["keys/.ssh/vagrant_rsa", "~/.vagrant.d/insecure_private_key"]
-  config.vm.provision "file", source: "keys/.ssh/vagrant_rsa.pub", destination: "~/.ssh/authorized_keys"
+
+  # ------------------------------------------------------------------
+  # Copy public key into guest, append idempotently to authorized_keys
+  # ------------------------------------------------------------------
+  config.vm.provision "file",
+    source: File.join(project_root, '.vagrant_keys', 'vagrant_ed25519.pub'),
+    destination: "/home/vagrant/vagrant_ed25519.pub"
+
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+    SSH_DIR="/home/vagrant/.ssh"
+    PUB_KEY="/home/vagrant/vagrant_ed25519.pub"
+
+    mkdir -p "$SSH_DIR"
+    chmod 700 "$SSH_DIR"
+    chown vagrant:vagrant "$SSH_DIR"
+
+    touch "$SSH_DIR/authorized_keys"
+    if ! grep -qxF "$(cat "$PUB_KEY")" "$SSH_DIR/authorized_keys"; then
+      cat "$PUB_KEY" >> "$SSH_DIR/authorized_keys"
+    fi
+
+    chmod 600 "$SSH_DIR/authorized_keys"
+    chown vagrant:vagrant "$SSH_DIR/authorized_keys"
+    rm -f "$PUB_KEY"
+  SHELL
+
+  # ------------------------------------------------------------------
+  # AFTER provision: reload and switch SSH to the host key
+  # We gate the SSH key path with an env var to avoid first-boot auth failure.
+  # ------------------------------------------------------------------
+  config.trigger.after :provision do |t|
+    t.name = "Switch SSH to host key"
+    t.run = {
+      inline: "powershell -NoLogo -NoProfile -Command \"New-Item -ItemType File -Force -Path '.vagrant/hostkey_ready' > $null; vagrant reload --no-provision\""
+    }
+  end
+
+# ------------------------------------------------------------------
+# BEFORE 'vagrant destroy': cleanup host keys (Windows host)
+# ------------------------------------------------------------------
+  config.trigger.before :destroy do |t|
+  t.name = "Cleanup SSH keys on host (Windows)"
+    t.run  = {
+      inline: "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"scripts/host/cleanup_ssh_keys.ps1\" -KeyDir \"#{project_root}/.vagrant_keys\" -KeyName vagrant_ed25519"
+    }
+  end
+  # Remove the marker once destruction finishes (optional)
+  config.trigger.after :destroy do |t|
+    t.name = "Remove host-key marker"
+    t.run = {
+      inline: "powershell -NoLogo -NoProfile -Command \"Remove-Item -Force '.vagrant/hostkey_ready' -ErrorAction SilentlyContinue\""
+    }
+  end
+
+
+# ------------------------------------------------------------------
+# END OF SSH MANAGEMENT
+# ------------------------------------------------------------------
+
+
+
   # time out increased to see if it will help when building box on serco machine
   config.vm.boot_timeout = 360
 
