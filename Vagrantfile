@@ -160,6 +160,8 @@ Vagrant.configure("2") do |config|
   config.vm.provision "shell", path: "scripts/guest/install_base.sh"
   # install sury.php.org repository for multiple php versions
   config.vm.provision "shell", path: "scripts/guest/install_suryphp.sh"
+  # install postgresql common to allow specific versions to be installed
+  config.vm.provision "shell", path: "scripts/guest/install_pg-common.sh"
 
   config.vm.provision "shell", inline: <<-SHELL
     set -euo pipefail
@@ -180,17 +182,11 @@ Vagrant.configure("2") do |config|
     chmod 0755 /var/www/html/testphp.php
 
     #  postgres
-    sudo apt-get install -y postgresql-common
-    sudo install -d /usr/share/postgresql-common/pgdg
-    sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
-    . /etc/os-release
-    sudo sh -c "echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
-    sudo apt-get update
     sudo apt-get install -y postgresql-15
 
     
   SHELL
-
+  
   # Separate NVM provisioning moved to script
   config.vm.provision "shell", path: "scripts/guest/install_nvm.sh"
 end
