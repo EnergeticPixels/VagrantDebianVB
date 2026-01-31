@@ -155,22 +155,15 @@ Vagrant.configure("2") do |config|
   # Enable provisioning with a shell script. Additional provisioners such as
   # Ansible, Chef, Docker, Puppet and Salt are also available. Please see the
   # documentation for more information about their specific syntax and use.
+
+  # install base packages needed for other setups
+  config.vm.provision "shell", path: "scripts/guest/install_base.sh"
+  # install sury.php.org repository for multiple php versions
+  config.vm.provision "shell", path: "scripts/guest/install_suryphp.sh"
+
   config.vm.provision "shell", inline: <<-SHELL
     set -euo pipefail
 
-    apt-get update
-    apt-get dist-upgrade -y
-    # common OS modules forming base of other applications
-    apt-get install -y ca-certificates apt-transport-https curl gnupg2 lsb-release git wget build-essential libssl-dev
-    apt-get update
-    
-    # Method on how to get different versions of PHP into Debian 
-    # Debian deprecated add-apt-repository ppa:.. methods
-    # reference https://www.devtutorial.io/how-to-install-php-7-4-on-debian-13-p3905.html
-    wget -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg
-    echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/php.list
-    apt-get update
-    
     # Node Version Manager moved to an external script
 
     # **** install specific version of PHP and properly enable
