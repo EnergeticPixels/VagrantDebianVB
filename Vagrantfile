@@ -22,83 +22,83 @@ Vagrant.configure("2") do |config|
   project_root = File.expand_path(ENV['VAGRANT_CWD'] || Dir.pwd)
 
   # ------------------------------------------------------------------
-  # SSH KEY MANAGEMENT
-  # ------------------------------------------------------------------
-    # --- Switch to host (project) key after the first successful provision+reload ---
-  if File.exist?(File.join(project_root, '.vagrant', 'hostkey_ready'))
-    config.ssh.private_key_path = [
-      File.join(project_root, '.vagrant_keys', 'vagrant_ed25519').tr('\\','/')
-    ]
-    # Enforce key-only auth (no password fallback)
-    config.ssh.password  = nil
-    config.ssh.keys_only = true
-  end
+# SSH KEY MANAGEMENT
+# ------------------------------------------------------------------
+# --- Switch to host (project) key after the first successful provision+reload ---
+if File.exist?(File.join(project_root, '.vagrant', 'hostkey_ready'))
+  config.ssh.private_key_path = [
+    File.join(project_root, '.vagrant_keys', 'vagrant_ed25519').tr('\\','/')
+  ]
+  config.ssh.password  = nil
+  config.ssh.keys_only = true
+end
 
-    # ------------------------------------------------------------------
-    # BEFORE 'vagrant up': generate SSH keypair on the Windows host
-    # ------------------------------------------------------------------
-  config.trigger.before :up do |t|
-    t.name = "Generate SSH keypair on host (Windows)"
-    t.run  = {
-      inline: "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"scripts/host/generate_ssh_keys.ps1\" -KeyDir \"#{project_root}/.vagrant_keys\" -KeyName vagrant_ed25519"
+# ------------------------------------------------------------------
+# BEFORE 'vagrant up': generate SSH keypair on the host using Bash
+# ------------------------------------------------------------------
+config.trigger.before :up do |t|
+  t.name = "Generate SSH keypair on host (Bash)"
+  t.run  = {
+    inline: %Q(sh -lc 'chmod +x "#{project_root}/scripts/host/generate_ssh_keys.sh" "#{project_root}/scripts/host/cleanup_ssh_keys.sh" && "#{project_root}/scripts/host/generate_ssh_keys.sh" --key-dir "#{project_root}/.vagrant_keys" --key-name vagrant_ed25519')
   }
-  end
+end
 
-    # First boot uses the box's default (insecure) key so provisioners can run
-  config.ssh.insert_key = false
+# First boot uses the box's default (insecure) key so provisioners can run
+config.ssh.insert_key = false
 
-    # ------------------------------------------------------------------
-    # Copy public key into guest, append idempotently to authorized_keys
-    # ------------------------------------------------------------------
-  config.vm.provision "file",
-    source: File.join(project_root, '.vagrant_keys', 'vagrant_ed25519.pub'),
-    destination: "/home/vagrant/vagrant_ed25519.pub"
+# ------------------------------------------------------------------
+# Copy public key into guest, append idempotently to authorized_keys
+# ------------------------------------------------------------------
+config.vm.provision "file",
+  source: File.join(project_root, '.vagrant_keys', 'vagrant_ed25519.pub'),
+  destination: "/home/vagrant/vagrant_ed25519.pub"
 
-  config.vm.provision "shell", inline: <<-SHELL
-    set -e
-    SSH_DIR="/home/vagrant/.ssh"
-    PUB_KEY="/home/vagrant/vagrant_ed25519.pub"
+config.vm.provision "shell", inline: <<-SHELL
+  set -e
+  SSH_DIR="/home/vagrant/.ssh"
+  PUB_KEY="/home/vagrant/vagrant_ed25519.pub"
 
-    mkdir -p "$SSH_DIR"
-    chmod 700 "$SSH_DIR"
-    chown vagrant:vagrant "$SSH_DIR"
+  mkdir -p "$SSH_DIR"
+  chmod 700 "$SSH_DIR"
+  chown vagrant:vagrant "$SSH_DIR"
 
-    touch "$SSH_DIR/authorized_keys"
-    if ! grep -qxF "$(cat "$PUB_KEY")" "$SSH_DIR/authorized_keys"; then
-      cat "$PUB_KEY" >> "$SSH_DIR/authorized_keys"
-    fi
+  touch "$SSH_DIR/authorized_keys"
+  if ! grep -qxF "$(cat "$PUB_KEY")" "$SSH_DIR/authorized_keys"; then
+    cat "$PUB_KEY" >> "$SSH_DIR/authorized_keys"
+  fi
 
-    chmod 600 "$SSH_DIR/authorized_keys"
-    chown vagrant:vagrant "$SSH_DIR/authorized_keys"
-    rm -f "$PUB_KEY"
-  SHELL
+  chmod 600 "$SSH_DIR/authorized_keys"
+  chown vagrant:vagrant "$SSH_DIR/authorized_keys"
+  rm -f "$PUB_KEY"
+SHELL
 
-    # ------------------------------------------------------------------
-    # AFTER provision: reload and switch SSH to the host key
-    # We gate the SSH key path with an env var to avoid first-boot auth failure.
-    # ------------------------------------------------------------------
-  config.trigger.after :provision do |t|
-    t.name = "Switch SSH to host key"
-    t.run = {
-      inline: "powershell -NoLogo -NoProfile -Command \"New-Item -ItemType File -Force -Path '.vagrant/hostkey_ready' > $null; vagrant reload --no-provision\""
-    }
-  end
-  # ------------------------------------------------------------------
-  # BEFORE 'vagrant destroy': cleanup host keys (Windows host)
-  # ------------------------------------------------------------------
-  config.trigger.before :destroy do |t|
-  t.name = "Cleanup SSH keys on host (Windows)"
-    t.run  = {
-      inline: "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"scripts/host/cleanup_ssh_keys.ps1\" -KeyDir \"#{project_root}/.vagrant_keys\" -KeyName vagrant_ed25519"
-    }
-  end
-  # Remove the marker once destruction finishes (optional)
-  config.trigger.after :destroy do |t|
-    t.name = "Remove host-key marker"
-    t.run = {
-      inline: "powershell -NoLogo -NoProfile -Command \"Remove-Item -Force '.vagrant/hostkey_ready' -ErrorAction SilentlyContinue\""
-    }
-  end
+# ------------------------------------------------------------------
+# AFTER provision: reload and switch SSH to the host key
+# ------------------------------------------------------------------
+config.trigger.after :provision do |t|
+  t.name = "Switch SSH to host key"
+  t.run = {
+    inline: %Q(sh -lc 'mkdir -p "#{project_root}/.vagrant" && : > "#{project_root}/.vagrant/hostkey_ready" && vagrant reload --no-provision')
+  }
+end
+
+# ------------------------------------------------------------------
+# BEFORE 'vagrant destroy': cleanup host keys (Bash)
+# ------------------------------------------------------------------
+config.trigger.before :destroy do |t|
+  t.name = "Cleanup SSH keys on host (Bash)"
+  t.run  = {
+    inline: %Q(sh -lc 'chmod +x "#{project_root}/scripts/host/cleanup_ssh_keys.sh" && "#{project_root}/scripts/host/cleanup_ssh_keys.sh" --key-dir "#{project_root}/.vagrant_keys" --key-name vagrant_ed25519')
+  }
+end
+
+# Remove the marker once destruction finishes (optional)
+config.trigger.after :destroy do |t|
+  t.name = "Remove host-key marker"
+  t.run = {
+    inline: %Q(sh -lc 'rm -f "#{project_root}/.vagrant/hostkey_ready"')
+  }
+end
 # ------------------------------------------------------------------
 # END OF SSH MANAGEMENT
 # ------------------------------------------------------------------
