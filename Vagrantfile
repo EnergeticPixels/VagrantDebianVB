@@ -17,9 +17,21 @@ end
 
 Vagrant.configure("2") do |config|
   config.env.enable
+  
   config.vm.box = ENV['BOX_NAME'] || "boxen/debian-13"
   config.vm.box_version = "2025.08.20.12"
   config.vm.box_check_update = false
+  
+  # HostManager configuration - automatically manage /etc/hosts on host and guest
+  domain_name = ENV['WEB_DNS'] || 'web.local'
+  config.vm.hostname = domain_name
+  
+  # Explicitly disable auto-run, we'll use provisioner instead
+  config.hostmanager.enabled = false
+  config.hostmanager.manage_host = true
+  config.hostmanager.manage_guest = true
+  config.hostmanager.aliases = ["www.#{domain_name}"]
+  
   project_root = File.expand_path(ENV['VAGRANT_CWD'] || Dir.pwd)
 
   # ------------------------------------------------------------------
@@ -79,14 +91,52 @@ SHELL
 config.trigger.after :provision do |t|
   t.name = "Switch SSH to host key"
   t.run = {
-    inline: %Q(sh -lc 'mkdir -p "#{project_root}/.vagrant" && : > "#{project_root}/.vagrant/hostkey_ready" && vagrant reload --no-provision')
+    inline: %Q(sh -lc '
+mkdir -p "#{project_root}/.vagrant"
+: > "#{project_root}/.vagrant/hostkey_ready"
+
+# Gracefully retry vagrant reload with exponential backoff
+# This handles the VM lock that may still be held by the provision process
+retry_reload() {
+  local max_attempts=5
+  local attempt=1
+  local delay=2
+  
+  while [ $attempt -le $max_attempts ]; do
+    if vagrant reload --no-provision 2>&1; then
+      return 0
+    fi
+    if [ $attempt -lt $max_attempts ]; then
+      echo "Reload attempt $attempt failed, retrying in ${delay}s..."
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    attempt=$((attempt + 1))
+  done
+  
+  echo "Warning: Could not auto-reload after provision. Run \"vagrant reload --no-provision\" manually when ready."
+  return 0
+}
+
+retry_reload
+')
   }
 end
 
 # ------------------------------------------------------------------
-# BEFORE 'vagrant destroy': cleanup host keys (Bash)
+# BEFORE 'vagrant destroy': cleanup SSL certificates
 # ------------------------------------------------------------------
 config.trigger.before :destroy do |t|
+  t.name = "Clean up SSL certificates"
+  t.run = {
+    inline: %Q(sh -lc 'vagrant ssh -c "bash /vagrant/scripts/guest/destroy_ssl.sh #{domain_name}"')
+  }
+end
+
+# ------------------------------------------------------------------
+# AFTER 'vagrant destroy': cleanup host keys (Bash)
+# ------------------------------------------------------------------
+config.trigger.after :destroy do |t|
   t.name = "Cleanup SSH keys on host (Bash)"
   t.run  = {
     inline: %Q(sh -lc 'chmod +x "#{project_root}/scripts/host/cleanup_ssh_keys.sh" && "#{project_root}/scripts/host/cleanup_ssh_keys.sh" --key-dir "#{project_root}/.vagrant_keys" --key-name vagrant_ed25519')
@@ -108,6 +158,7 @@ end
   config.vm.boot_timeout = 360
 
   config.vm.network "forwarded_port", guest: 80, host: 8080, host_ip: "127.0.0.1"
+  config.vm.network "forwarded_port", guest: 443, host: 8443, host_ip: "127.0.0.1"
 
   # Create a private network, which allows host-only access to the machine
   # using a specific IP.
@@ -125,6 +176,22 @@ end
 # ------------------------------------------------------------------
 # PROVISIONING
 # ------------------------------------------------------------------
+  # Hostmanager provisioner - manages /etc/hosts on host and guest
+  config.vm.provision :hostmanager
+  
+  # Fallback: Manually ensure guest /etc/hosts has domain entry
+  config.vm.provision "shell", inline: <<-SHELL
+    set -euo pipefail
+    DOMAIN="#{domain_name}"
+    HOSTS_FILE="/etc/hosts"
+    
+    # Only add if not already present
+    if ! grep -q "127.0.0.1.*${DOMAIN}" "$HOSTS_FILE"; then
+      echo "127.0.0.1  ${DOMAIN} www.${DOMAIN}" >> "$HOSTS_FILE"
+      echo "Added ${DOMAIN} to guest /etc/hosts"
+    fi
+  SHELL
+  
   # install base packages needed for other setups
   config.vm.provision "shell", path: "scripts/guest/install_base.sh"
   # Install NodeJS Version Manager (NVM)
@@ -154,5 +221,8 @@ end
     sudo apt-get install -y postgresql-15
 
   SHELL
+
+  # Configure SSL certificates and HTTPS
+  config.vm.provision "shell", path: "scripts/guest/install_ssl.sh", args: [ENV['WEB_DNS']]
   
 end
