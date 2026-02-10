@@ -16,7 +16,8 @@ unless File.respond_to?(:exists?)
 end
 
 Vagrant.configure("2") do |config|
-  config.vm.box = "boxen/debian-13"
+  config.env.enable
+  config.vm.box = ENV['BOX_NAME'] || "boxen/debian-13"
   config.vm.box_version = "2025.08.20.12"
   config.vm.box_check_update = false
   project_root = File.expand_path(ENV['VAGRANT_CWD'] || Dir.pwd)
