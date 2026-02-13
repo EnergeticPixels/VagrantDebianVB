@@ -25,6 +25,19 @@
     - Sample PHP driven page (testphp.php) to prove PHP was installed correctly. Copied to /var/www/html with appropriate permissions.
   - PostgreSQL via postgresql-common
     - Selectable PG versions (default 15)
+    - Description of programming process (readme)[./README_PG-DB.md]
+  - SSL support
+    - Description of programming process (readme)[./README_SSL.md]
+  - Environment variables
+    - Copy .env.sample to .env. Change values as required.
   - Node Version Manager (NVM)
     - Selectable node.js version via terminal (no default)
-    
+
+### Constraints
+- Built with Vagrant 2.4.9 (other versions, your milage may vary)
+- Vagrant plugins installed:
+  - vagrant-env
+  - vagrant-hostmanager
+- Vagrant project only works within bash shell
+- User will need admin rights to Windows UAC due hostmanager requirements
+ 
