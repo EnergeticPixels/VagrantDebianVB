@@ -201,6 +201,8 @@ end
   # install postgresql common to allow specific versions to be installed
   config.vm.provision "shell", path: "scripts/guest/install_pg-common.sh"
 
+  db_version = ENV['DB_VERSION'] || '15'
+
   config.vm.provision "shell", inline: <<-SHELL
     set -euo pipefail
 
@@ -217,12 +219,14 @@ end
     chown www-data:www-data /var/www/html/testphp.php
     chmod 0755 /var/www/html/testphp.php
 
-    #  postgres
-    sudo apt-get install -y postgresql-15
+    #  postgres - install from DB_VERSION environment variable
+    sudo apt-get install -y postgresql-#{db_version}
 
   SHELL
 
   # Configure SSL certificates and HTTPS
   config.vm.provision "shell", path: "scripts/guest/install_ssl.sh", args: [ENV['WEB_DNS']]
   
+  # Setup Moodle database and user
+  config.vm.provision "shell", path: "scripts/guest/install_moodle_db.sh", args: [ENV['MOODLE_USER'], ENV['MOODLE_PASS']]
 end
